@@ -1,6 +1,8 @@
-<<<<<<< HEAD
-# go-factory-quality-system
-A containerized factory quality monitoring system built with Go, gRPC, REST APIs, and MySQL. It receives manufacturing measurements, validates them against predefined quality ranges, and asynchronously stores the results in a database using goroutines and channels. Docker Compose orchestrates the services.
+# Go Factory Quality System
+
+A containerized factory quality monitoring system built with Go, gRPC, REST APIs, and MySQL.
+
+It receives manufacturing measurements, validates them against predefined quality ranges, and asynchronously stores the results in a database using goroutines and channels. Docker Compose orchestrates the services.
 =======
 # Factory Quality-Control Backend (Go)
 
@@ -68,7 +70,7 @@ Try an invalid measurement:
 ```bash
 curl -X POST http://localhost:8080/measurements \
   -H "Content-Type: application/json" \
-  -d '{"vin":"VIN123","component":"battery","value":18}'
+  -d '{"vin":"VIN123","component":"wheel_bolts","value":22}'
 ```
 
 Try an unknown component:
@@ -148,6 +150,6 @@ Change these values to experiment with different acceptance ranges.
 - The receiver returns `202 Accepted` before background processing finishes. Check the history after a short pause.
 - The queue is in memory. If the receiver stops before queued jobs are processed, those queued jobs are lost. A production system would use a durable message broker or database-backed queue.
 - The demo uses an insecure gRPC connection inside the local Docker network. Production deployments should use TLS and authentication.
-- The gRPC contract uses `google.protobuf.Struct` to keep the example compact and avoid requiring generated Go protobuf files. The included `.proto` file documents the RPC shape. A larger project would normally generate strongly typed Go code from the `.proto` file using `protoc`.
+- The gRPC contract is defined in `proto/checker.proto`, with generated Go protobuf and gRPC code in `internal/checkerpb/`.
 - The checker and receiver are separate services and can be developed/deployed independently.
 >>>>>>> 503f5fc (Initial commit: Factory Quality System)
