@@ -1,0 +1,53 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  checker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host
+    command: ["./checker"]
+    environment:
+      GRPC_PORT: "50051"
+    ports:
+      - "50051:50051"
+
+  receiver:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host
+    command: ["./receiver"]
+    environment:
+      HTTP_PORT: "8080"
+      GRPC_ADDRESS: "checker:50051"
+      MYSQL_DSN: "${MYSQL_USER}:${MYSQL_PASSWORD}@tcp(mysql:3306)/${MYSQL_DATABASE}?parseTime=true"
+      WORKERS: "3"
+      QUEUE_SIZE: "100"
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      checker:
+        condition: service_started
+
+volumes:
+  mysql_data:

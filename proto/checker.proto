@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package checker;
+
+option go_package = "factory-quality-system/internal/checkerpb";
+
+service Checker {
+    rpc CheckMeasurement (CheckRequest)
+        returns (CheckResponse);
+}
+
+message CheckRequest {
+    string component = 1;
+    double value = 2;
+}
+
+message CheckResponse {
+    bool valid = 1;
+}
