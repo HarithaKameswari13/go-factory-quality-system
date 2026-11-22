@@ -1,103 +1,269 @@
 # Go Factory Quality System
 
-A containerized factory quality monitoring system built with Go, gRPC, REST APIs, and MySQL.
+A containerized, distributed factory quality monitoring backend built with **Go, gRPC, REST APIs, MySQL and Docker Compose**.
 
-It receives manufacturing measurements, validates them against predefined quality ranges, and asynchronously stores the results in a database using goroutines and channels. Docker Compose orchestrates the services.
-=======
-# Factory Quality-Control Backend (Go)
+The system receives manufacturing measurements through an HTTP API, delegates quality validation to an independent gRPC service, and asynchronously persists the results using Go channels and background workers.
 
-A small learning project demonstrating:
-- **Gorilla Mux**: HTTP routing in the receiver service.
-- **gRPC**: communication between the receiver and checker services.
-- **Goroutines + channels**: background workers process queued measurements.
-- **MySQL**: persistent measurement history.
-- **Docker Compose**: starts all services together.
+The project explores service decomposition, inter-service communication, concurrent processing, database integration and containerized deployment.
 
-## Start everything
+## Architecture
 
-Install Docker Desktop (with Docker Compose), open a terminal in this folder, and run:
+The application consists of three independently running services.
+
+| Component | Responsibility | Technology |
+|---|---|---|
+| Receiver | Exposes REST endpoints, accepts measurements and coordinates processing | Go, Gorilla Mux |
+| Checker | Validates measurements against predefined quality ranges | Go, gRPC |
+| Database | Stores measurement results and vehicle history | MySQL |
+
+### System Architecture
+
+```text
+                 External Client
+                       |
+                       | HTTP / JSON
+                       v
+              +-------------------+
+              |  Receiver Service |
+              |                   |
+              |   REST API        |
+              +-------------------+
+                       |
+                       | Submit measurement
+                       v
+              +-------------------+
+              |    Go Channel     |
+              |  In-memory Queue  |
+              +-------------------+
+                       |
+                       v
+              +-------------------+
+              | Background Worker |
+              +-------------------+
+                       |
+                +------+------+
+                |             |
+                v             v
+          +-----------+  +-----------+
+          |  Checker  |  |   MySQL   |
+          |   gRPC    |  | Database  |
+          +-----------+  +-----------+
+```
+
+## Measurement Processing Flow
+
+1. A client submits a manufacturing measurement through the REST API.
+2. The receiver validates the incoming request and places the measurement into a Go channel.
+3. The receiver responds with HTTP `202 Accepted`, indicating that the measurement has been queued for processing.
+4. A background worker retrieves the measurement from the channel.
+5. The worker sends a gRPC request to the Checker service.
+6. The Checker evaluates the measurement against predefined component-specific acceptance ranges.
+7. The worker receives the validation result and persists the measurement, including its validity status, in MySQL.
+8. Clients can retrieve previously processed measurements through the vehicle history endpoint.
+
+## Concurrency and Asynchronous Processing
+
+The receiver separates HTTP request handling from measurement validation and database persistence.
+
+Instead of performing all operations within the HTTP request lifecycle, measurements are submitted to an in-memory Go channel and processed by background goroutines.
+
+This design provides:
+
+- Decoupling between request handling and background processing.
+- Faster HTTP acknowledgements without waiting for database insertion.
+- Independent processing of queued measurements.
+- A foundation for concurrent processing through multiple workers.
+
+The current implementation uses an in-memory queue. Consequently, queued measurements are not durable and can be lost if the receiver process terminates before processing them.
+
+For production environments, a persistent messaging solution would be required.
+
+## Inter-Service Communication
+
+The Receiver and Checker are separate Go services communicating through gRPC.
+
+The service contract is defined using Protocol Buffers in:
+
+```text
+proto/checker.proto
+```
+
+Generated Go protobuf and gRPC definitions are located in:
+
+```text
+internal/checkerpb/
+```
+
+The Checker exposes a measurement validation RPC. It receives the component name and measurement value and returns a validation result.
+
+This separation keeps quality validation logic independent of HTTP request handling and allows the services to be developed and deployed separately.
+
+## Quality Validation
+
+The Checker maintains component-specific acceptance ranges.
+
+Current example validation rules:
+
+| Component | Minimum | Maximum |
+|---|---:|---:|
+| Wheel bolts | 20 | 25 |
+| Battery | 20 | 25 |
+
+These ranges are defined in the Checker service and can be modified independently of the Receiver.
+
+## Database and Persistence
+
+MySQL is used to maintain measurement history.
+
+The database stores information such as:
+
+- Vehicle identification number (VIN).
+- Component name.
+- Measured value.
+- Validation result.
+- Measurement processing timestamp.
+
+Database initialization is handled through:
+
+```text
+db/init.sql
+```
+
+The Receiver uses Go's `database/sql` package and the MySQL driver to interact with the database.
+
+Database connection details are supplied through environment variables rather than hardcoded into the application.
+
+## Technology Stack
+
+| Technology | Purpose |
+|---|---|
+| Go | Backend services and concurrent processing |
+| Gorilla Mux | HTTP routing |
+| gRPC | Inter-service communication |
+| Protocol Buffers | Service contract and message definitions |
+| MySQL | Persistent data storage |
+| Go channels | In-memory measurement queue |
+| Goroutines | Background processing |
+| Docker | Containerization |
+| Docker Compose | Multi-service orchestration |
+
+## Project Structure
+
+```text
+go-factory-quality-system/
+│
+├── cmd/
+│   ├── receiver/
+│   │   └── main.go
+│   │
+│   └── checker/
+│       └── main.go
+│
+├── internal/
+│   └── checkerpb/
+│       ├── checker.pb.go
+│       └── checker_grpc.pb.go
+│
+├── proto/
+│   └── checker.proto
+│
+├── db/
+│   └── init.sql
+│
+├── Dockerfile
+├── docker-compose.yml
+├── .env.example
+├── .gitignore
+├── go.mod
+├── go.sum
+└── README.md
+```
+
+## Getting Started
+
+### Prerequisites
+
+- Docker Desktop
+- Docker Compose
+- Git
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/HarithaKameswari13/go-factory-quality-system.git
+
+cd go-factory-quality-system
+```
+
+### 2. Configure environment variables
+
+Create a local `.env` file from the example:
+
+**Windows PowerShell:**
+
+```powershell
+Copy-Item .env.example .env
+```
+
+**Linux / macOS:**
+
+```bash
+cp .env.example .env
+```
+
+Review the configuration before starting the services.
+
+The example credentials are intended for local development only.
+
+### 3. Start the services
 
 ```bash
 docker compose up --build
 ```
 
-The first run downloads images and Go dependencies. When startup finishes, the receiver is available at `http://localhost:8080`.
+Docker Compose builds and starts the Receiver, Checker and MySQL services.
 
-Stop with `Ctrl+C`. To stop and remove the containers:
+The HTTP API is available at:
+
+```text
+http://localhost:8080
+```
+
+### 4. Stop the services
 
 ```bash
 docker compose down
 ```
 
-To also delete the stored database data (this permanently clears the demo history):
+To also remove the database volume and its stored data:
 
 ```bash
 docker compose down -v
 ```
 
-## Try it
+**Warning:** Removing the volume permanently deletes the persisted database data.
 
-### 1. Check the receiver
+## API Reference
+
+### Health Check
+
+**GET** `/health`
+
+Checks the receiver and database availability.
+
+Example:
 
 ```bash
 curl http://localhost:8080/health
 ```
 
-Expected response:
+### Submit a Measurement
 
-```json
-{"status":"ok"}
-```
+**POST** `/measurements`
 
-### 2. Submit a measurement
+Accepts a manufacturing measurement for asynchronous validation and storage.
 
-```bash
-curl -X POST http://localhost:8080/measurements \
-  -H "Content-Type: application/json" \
-  -d '{"vin":"VIN123","component":"wheel_bolts","value":22}'
-```
-
-Expected response (HTTP 202):
-
-```json
-{"status":"accepted","message":"Measurement queued for checking and storage"}
-```
-
-**Important:** `202 Accepted` means the receiver queued the work. A background worker then asks the checker to validate it and saves the result to MySQL. Give it a moment before requesting history.
-
-Try an invalid measurement:
-
-```bash
-curl -X POST http://localhost:8080/measurements \
-  -H "Content-Type: application/json" \
-  -d '{"vin":"VIN123","component":"wheel_bolts","value":22}'
-```
-
-Try an unknown component:
-
-```bash
-curl -X POST http://localhost:8080/measurements \
-  -H "Content-Type: application/json" \
-  -d '{"vin":"VIN123","component":"paint","value":22}'
-```
-
-### 3. Retrieve a car's history
-
-```bash
-curl http://localhost:8080/cars/VIN123/history
-```
-
-You should see the submitted measurements, their values, whether each was valid, and the time they were checked.
-
-## API summary
-
-| Method | Endpoint | Purpose |
-|---|---|---|
-| GET | `/health` | Check receiver and database |
-| POST | `/measurements` | Queue a measurement |
-| GET | `/cars/{vin}/history` | Read a car's saved measurements |
-
-Example request body:
+Example request:
 
 ```json
 {
@@ -107,49 +273,61 @@ Example request body:
 }
 ```
 
-## How the code is organised
+Example response:
 
-```text
-cmd/
-  receiver/       HTTP API, worker queue, MySQL access
-  checker/        gRPC server containing validation rules
-internal/
-  checkerpb/      Small gRPC client/server definitions
-proto/
-  checker.proto   The service contract
-db/
-  init.sql        Creates the measurements table
-docker-compose.yml
-Dockerfile
-```
-
-## Follow the flow in the code
-
-1. `cmd/receiver/main.go` creates the Gorilla Mux router and starts worker goroutines.
-2. `submitMeasurement` validates the incoming JSON and puts a job on a Go channel.
-3. `worker` takes jobs from the channel, calls the checker using gRPC, and inserts the result into MySQL.
-4. `cmd/checker/main.go` receives the gRPC call and applies the allowed ranges.
-5. `carHistory` queries MySQL and returns the records as JSON.
-
-## Where are the rules?
-
-Open `cmd/checker/main.go` and find the `ranges` map:
-
-```go
-ranges := map[string][2]float64{
-    "wheel_bolts": {20, 25},
-    "battery":     {20, 25},
+```json
+{
+  "status": "accepted",
+  "message": "Measurement queued for checking and storage"
 }
 ```
 
-Change these values to experiment with different acceptance ranges.
+HTTP status: `202 Accepted`
 
-## Learning notes and limitations
+A successful response indicates that the measurement was accepted into the processing queue. It does not guarantee that validation and database persistence have completed.
 
-- This is a teaching/demo project, not production-ready factory software.
-- The receiver returns `202 Accepted` before background processing finishes. Check the history after a short pause.
-- The queue is in memory. If the receiver stops before queued jobs are processed, those queued jobs are lost. A production system would use a durable message broker or database-backed queue.
-- The demo uses an insecure gRPC connection inside the local Docker network. Production deployments should use TLS and authentication.
-- The gRPC contract is defined in `proto/checker.proto`, with generated Go protobuf and gRPC code in `internal/checkerpb/`.
-- The checker and receiver are separate services and can be developed/deployed independently.
->>>>>>> 503f5fc (Initial commit: Factory Quality System)
+### Retrieve Vehicle Measurement History
+
+**GET** `/cars/{vin}/history`
+
+Retrieves the stored measurement history for a specific vehicle.
+
+Example:
+
+```bash
+curl http://localhost:8080/cars/VIN123/history
+```
+
+The response includes the recorded measurements and their validation results.
+
+## Design Decisions and Engineering Trade-offs
+
+### 1. Asynchronous processing
+
+Background processing decouples HTTP request handling from validation and database operations.
+
+This improves request responsiveness but introduces eventual processing and delivery considerations.
+
+### 2. Service separation
+
+The Receiver and Checker have separate responsibilities and communicate through a defined gRPC contract.
+
+This reduces coupling between the API layer and business validation logic.
+
+### 3. In-memory queue
+
+Go channels provide a lightweight mechanism for coordinating concurrent workers without introducing an external messaging dependency.
+
+The trade-off is that queued messages are not persisted across process restarts.
+
+### 4. Environment-based configuration
+
+Database credentials and connection settings are supplied through environment variables.
+
+This keeps configuration separate from application source code and allows different environments to use different settings.
+
+
+
+**Project:** Go Factory Quality System  
+**Language:** Go  
+**Repository:** [HarithaKameswari13/go-factory-quality-system](https://github.com/HarithaKameswari13/go-factory-quality-system)
